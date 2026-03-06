@@ -1,65 +1,101 @@
-import Image from "next/image";
+import { redirect } from 'next/navigation'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
 
-export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+export default async function AdminDashboard() {
+    // REQUIREMENT: Await cookies for the latest Next.js version
+    const cookieStore = await cookies()
+
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                get(name: string) { return cookieStore.get(name)?.value },
+            },
+        }
+    )
+
+    // 1. LOGIN WALL: Check if user is logged in
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+        // If not logged in, you can redirect to your main app's login
+        // or a simple message. For now, we'll redirect to root.
+        redirect('/')
+    }
+
+    // 2. SUPERADMIN CHECK: Only allow users with is_superadmin == TRUE
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('is_superadmin')
+        .eq('id', user.id)
+        .single()
+
+    if (!profile?.is_superadmin) {
+        return (
+            <div className="p-20 text-center bg-white min-h-screen">
+                <h1 className="text-red-600 font-black text-4xl mb-4">ACCESS DENIED</h1>
+                <p className="text-black text-xl">
+                    This staging area is restricted to Superadmins only.
+                </p>
+            </div>
+        )
+    }
+
+    // 3. CREATIVE STATS: Highlighting interesting data
+    // Fetching counts from your tables to show system health
+    const { count: userCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
+    const { count: imageCount } = await supabase.from('images').select('*', { count: 'exact', head: true })
+    const { count: captionCount } = await supabase.from('sidechat_posts').select('*', { count: 'exact', head: true })
+
+    return (
+        <main className="p-8 bg-gray-50 min-h-screen text-black">
+            <header className="mb-12 border-b-8 border-black pb-4">
+                <h1 className="text-5xl font-black uppercase tracking-tighter">
+                    Admin Dashboard
+                </h1>
+                <p className="text-gray-600 font-bold mt-2">Staging Environment Management</p>
+            </header>
+
+            {/* SECTION: Interesting Statistics (Creative Requirement) */}
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+                <div className="p-8 bg-white border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <h2 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Total Profiles</h2>
+                    <p className="text-6xl font-black">{userCount || 0}</p>
+                </div>
+                <div className="p-8 bg-white border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <h2 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Images Stored</h2>
+                    <p className="text-6xl font-black">{imageCount || 0}</p>
+                </div>
+                <div className="p-8 bg-white border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <h2 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2">Captions READ</h2>
+                    <p className="text-6xl font-black">{captionCount || 0}</p>
+                </div>
+            </section>
+
+            {/* SECTION: Management Routes */}
+            <section>
+                <h3 className="text-2xl font-black mb-6 underline decoration-4 decoration-yellow-400">
+                    Database Management
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <Link href="/admin/users"
+                          className="p-6 bg-black text-white font-bold text-center hover:bg-gray-800 transition-all">
+                        MANAGE USERS (READ)
+                    </Link>
+
+                    <Link href="/admin/images"
+                          className="p-6 bg-blue-600 text-white font-bold text-center hover:bg-blue-700 transition-all">
+                        MANAGE IMAGES (CRUD)
+                    </Link>
+
+                    <Link href="/admin/captions"
+                          className="p-6 bg-green-600 text-white font-bold text-center hover:bg-green-700 transition-all">
+                        READ CAPTIONS
+                    </Link>
+                </div>
+            </section>
+        </main>
+    )
 }
