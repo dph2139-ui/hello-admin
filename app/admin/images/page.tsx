@@ -1,59 +1,99 @@
 'use client'
 import { createBrowserClient } from '@supabase/ssr'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
-export default function ManageImages() {
+export default function ImageManager() {
     const [images, setImages] = useState<any[]>([])
-    const supabase = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    const [uploading, setUploading] = useState(false)
 
-    useEffect(() => {
-        fetchImages()
-    }, [])
+    const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
 
-    async function fetchImages() {
-        const { data } = await supabase.from('images').select('*')
+    const fetchImages = useCallback(async () => {
+        const { data } = await supabase.from('images').select('*').order('created_at', { ascending: false })
         if (data) setImages(data)
+    }, [supabase])
+
+    useEffect(() => { fetchImages() }, [fetchImages])
+
+    // CREATE: Function to upload and register new image
+    async function uploadImage(event: React.ChangeEvent<HTMLInputElement>) {
+        try {
+            setUploading(true)
+            if (!event.target.files || event.target.files.length === 0) return
+            const file = event.target.files[0]
+            const fileExt = file.name.split('.').pop()
+            const fileName = `${Math.random()}.${fileExt}`
+            const filePath = `admin-uploads/${fileName}`
+
+            // 1. Upload to Supabase Storage Bucket
+            const { error: uploadError } = await supabase.storage
+                .from('images') // Ensure you have a bucket named 'images'
+                .upload(filePath, file)
+
+            if (uploadError) throw uploadError
+
+            // 2. Get Public URL
+            const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(filePath)
+
+            // 3. Insert into 'images' table
+            const { error: dbError } = await supabase.from('images').insert({
+                url: publicUrl,
+                storage_path: filePath
+            })
+
+            if (dbError) throw dbError
+            await fetchImages()
+            alert('Upload successful!')
+        } catch (error: any) {
+            alert(error.message)
+        } finally {
+            setUploading(false)
+        }
     }
 
-    async function deleteImage(id: string) {
-        const confirmDelete = confirm("Are you sure you want to delete this image?")
-        if (!confirmDelete) return
+    // DELETE: Remove image from DB and Storage
+    async function deleteImage(id: string, storagePath: string) {
+        if (!confirm('Delete this image forever?')) return
 
-        const { error } = await supabase.from('images').delete().eq('id', id)
-        if (error) alert(error.message)
-        else fetchImages() // Refresh list
+        await supabase.storage.from('images').remove([storagePath])
+        await supabase.from('images').delete().eq('id', id)
+        await fetchImages()
     }
 
     return (
-        <div className="p-8 text-black">
-            <h1 className="text-2xl font-bold mb-6">Manage Images</h1>
-            <table className="w-full border-collapse border border-gray-300">
-                <thead>
-                <tr className="bg-gray-100">
-                    <th className="border p-2">Image ID</th>
-                    <th className="border p-2">Preview</th>
-                    <th className="border p-2">Actions</th>
-                </tr>
-                </thead>
-                <tbody>
+        <div className="p-10 text-black bg-white min-h-screen">
+            <h1 className="text-3xl font-black uppercase mb-8 border-b-4 border-black">Image Management (CRUD)</h1>
+
+            {/* UPLOAD SECTION */}
+            <div className="mb-10 p-6 border-4 border-black bg-yellow-400 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                <h2 className="font-bold uppercase mb-2">Upload New Image</h2>
+                <input
+                    type="file"
+                    accept="image/*"
+                    onChange={uploadImage}
+                    disabled={uploading}
+                    className="block w-full text-sm text-black file:mr-4 file:py-2 file:px-4 file:border-2 file:border-black file:text-sm file:font-black file:bg-white hover:file:bg-gray-100"
+                />
+                {uploading && <p className="mt-2 animate-bounce font-bold">UPLOADING...</p>}
+            </div>
+
+            {/* READ SECTION: Image Gallery */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                 {images.map((img) => (
-                    <tr key={img.id}>
-                        <td className="border p-2 text-xs">{img.id}</td>
-                        <td className="border p-2">
-                            <img src={img.url} alt="Admin preview" className="h-10 w-10 object-cover" />
-                        </td>
-                        <td className="border p-2">
-                            <button
-                                onClick={() => deleteImage(img.id)}
-                                className="bg-red-500 text-white px-3 py-1 rounded font-bold"
-                            >
-                                DELETE
-                            </button>
-                        </td>
-                    </tr>
+                    <div key={img.id} className="border-2 border-black p-2 bg-gray-50 flex flex-col">
+                        <img src={img.url} alt="Admin Preview" className="h-40 w-full object-cover border-2 border-black mb-2" />
+                        <button
+                            onClick={() => deleteImage(img.id, img.storage_path)}
+                            className="mt-auto bg-red-600 text-white font-black text-xs py-2 hover:bg-black transition-colors"
+                        >
+                            DELETE
+                        </button>
+                    </div>
                 ))}
-                </tbody>
-            </table>
+            </div>
         </div>
     )
 }
